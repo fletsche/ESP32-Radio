@@ -394,6 +394,7 @@ enum enc_menu_t { VOLUME, PRESET, TRACK } ;              // State for rotary enc
 enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mode
 
 int8_t            shutdown_logic = -1 ;                   // shutdown pin is active high by default // DAVID
+int8_t            enc_internal_pullup = 0 ;              // internal pullups for rotary encoder are disabled by default (external pullups required)
 
 // Include software for the right display
 #ifdef BLUETFT
@@ -2437,6 +2438,7 @@ void readIOprefs()
     { "pin_spi_miso", &ini_block.spi_miso_pin,    19          },
     { "pin_spi_mosi", &ini_block.spi_mosi_pin,    23          },
     { "shutdown_logic", &shutdown_logic,          -1          },
+    { "enc_internal_pullup", &enc_internal_pullup, 0          },
     { NULL,           NULL,                       0           }    // End of list
   } ;
   int         i ;                                         // Loop control
@@ -3243,6 +3245,12 @@ void setup()
   // Init settings for rotary switch (if existing).
   if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
   {
+    if ( enc_internal_pullup ) {                        // DAVID
+      pinMode ( ini_block.enc_clk_pin, INPUT_PULLUP );
+      pinMode ( ini_block.enc_dt_pin, INPUT_PULLUP );
+      pinMode ( ini_block.enc_sw_pin, INPUT_PULLUP );
+      dbgprint ( "Internal pullups activated for rotary encoder" ) ;
+    }
     attachInterrupt ( ini_block.enc_clk_pin, isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_sw_pin,  isr_enc_switch, CHANGE ) ;
