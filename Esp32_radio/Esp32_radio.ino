@@ -151,10 +151,10 @@
 #define BINFILE     "/Arduino/Esp32_radio.ino.bin"      // Binary file name for update software
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
-// Define (just one) type of display.  See documentation.
-#define BLUETFT                      // Works also for RED TFT 128x160
+// Define (one) type of display.  See documentation.
+//#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
-//#define DUMMYTFT                     // Dummy display
+#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
 //#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
@@ -176,6 +176,7 @@
 #include <esp_partition.h>
 #include <driver/adc.h>
 #include <Update.h>
+#include <HardwareSerial.h>
 
 // Number of entries in the queue
 #define QSIZ 400
@@ -354,6 +355,7 @@ TaskHandle_t      xplaytask ;                            // Task handle for play
 TaskHandle_t      xspftask ;                             // Task handle for special functions
 SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI usage
 hw_timer_t*       timer = NULL ;                         // For timer
+HardwareSerial    mySerial(1);                           // HardwareSerial for using non-standard pins
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
 uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
@@ -1384,8 +1386,8 @@ char* dbgprint ( const char* format, ... )
   va_end ( varArgs ) ;                                 // End of using parameters
   if ( DEBUG )                                         // DEBUG on?
   {
-    Serial.print ( "D: " ) ;                           // Yes, print prefix
-    Serial.println ( sbuf ) ;                          // and the info
+    mySerial.print ( "D: " ) ;                           // Yes, print prefix
+    mySerial.println ( sbuf ) ;                          // and the info
   }
   return sbuf ;                                        // Return stored string
 }
@@ -2940,10 +2942,10 @@ void scanserial()
   const char*   reply = "" ;                     // Reply string from analyzeCmd
   uint16_t      len ;                            // Length of input string
 
-  while ( Serial.available() )                   // Any input seen?
+  while ( mySerial.available() )                   // Any input seen?
   {
-    c =  (char)Serial.read() ;                   // Yes, read the next input character
-    //Serial.write ( c ) ;                       // Echo
+    c =  (char)mySerial.read() ;                   // Yes, read the next input character
+    //mySerial.write ( c ) ;                       // Echo
     len = serialcmd.length() ;                   // Get the length of the current string
     if ( ( c == '\n' ) || ( c == '\r' ) )
     {
@@ -3419,8 +3421,8 @@ void setup()
   const char*               wvn = "Include file %s_html has the wrong version number! "
                                   "Replace header file." ;
 
-  Serial.begin ( 115200 ) ;                              // For debug
-  Serial.println() ;
+  mySerial.begin ( 115200, SERIAL_8N1, 0, 4 ) ;                          // For debug, (BAUDRATE, UART-Mode, RX-pin, TX-pin)
+  mySerial.println() ;
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
   if ( config_html_version  < 180806 ) dbgprint ( wvn, "config" ) ;
