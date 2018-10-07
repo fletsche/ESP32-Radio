@@ -271,6 +271,7 @@ struct ini_struct
   int8_t         spi_sck_pin ;                        // GPIO connected to SPI SCK pin
   int8_t         spi_miso_pin ;                       // GPIO connected to SPI MISO pin
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
+  int8_t         led_on ;                             // GPIO connected to ON/OFF LED
   uint16_t       bat0 ;                               // ADC value for 0 percent battery charge
   uint16_t       bat100 ;                             // ADC value for 100 percent battery charge
 } ;
@@ -651,6 +652,7 @@ class VS1053
     int8_t        dreq_pin ;                       // Pin where DREQ line is connected
     int8_t        shutdown_pin ;                   // Pin where the shutdown line is connected
     int8_t        shutdownx_pin ;                  // Pin where the shutdown (inversed) line is connected
+    int8_t        onoff_pin ;                      // Pin where the On/Off LED is connected
     uint8_t       curvol ;                         // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
@@ -720,7 +722,7 @@ class VS1053
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
     VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin,
-             int8_t _shutdown_pin, int8_t _shutdownx_pin ) ;
+             int8_t _shutdown_pin, int8_t _shutdownx_pin, int8_t _onoff_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
     // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
@@ -753,9 +755,9 @@ class VS1053
 //**************************************************************************************************
 
 VS1053::VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin,
-                 int8_t _shutdown_pin, int8_t _shutdownx_pin ) :
+                 int8_t _shutdown_pin, int8_t _shutdownx_pin, int8_t _onoff_pin ) :
   cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), shutdown_pin(_shutdown_pin),
-  shutdownx_pin(_shutdownx_pin)
+  shutdownx_pin(_shutdownx_pin), onoff_pin(_onoff_pin)
 {
 }
 
@@ -1032,6 +1034,10 @@ void  VS1053::output_enable ( bool ena )               // Enable amplifier throu
   if ( shutdownx_pin >= 0 )                            // Shutdown (inversed logic) in use?
   {
     digitalWrite ( shutdownx_pin, ena ) ;              // Shut down or enable audio output
+  }
+  if ( onoff_pin >= 0 )
+  {
+    digitalWrite ( onoff_pin, ena ) ;                 // Change status of On/Off LED
   }
 }
 
@@ -2335,7 +2341,7 @@ void update_software()
   bool        isoc    = false ;                                 // True for valid stream
   String      line ;                                            // Input header line
   String      newlstmod ;                                       // Last modified from host
-  
+
   updatereq = false ;                                           // Clear update flag
   otastart() ;                                                  // Show something on screen
   stop_mp3client () ;                                           // Stop input stream
@@ -2371,7 +2377,7 @@ void update_software()
       break ;                                                   // Yes, get the OTA started
     }
     // Check if the HTTP Response is 200.  Any other response is an error.
-    if ( line.startsWith ( "HTTP/1.1" ) )                       // 
+    if ( line.startsWith ( "HTTP/1.1" ) )                       //
     {
       if ( line.indexOf ( " 200 " ) < 0 )
       {
@@ -2394,7 +2400,7 @@ void update_software()
   {
     dbgprint ( "No new version available" ) ;                   // No, show reason
     otaclient.flush() ;
-    return ;    
+    return ;
   }
   if ( ( clength > 0 ) && isoc )
   {
@@ -2619,6 +2625,7 @@ void readIOprefs()
     { "pin_vs_dreq",   &ini_block.vs_dreq_pin,      -1 },
     { "pin_shutdown",  &ini_block.vs_shutdown_pin,  -1 }, // Amplifier shut-down pin
     { "pin_shutdownx", &ini_block.vs_shutdownx_pin, -1 }, // Amplifier shut-down pin (inversed logic)
+    { "pin_onoffled",  &ini_block.led_on,           -1 }, // On/Off LED
     { "pin_spi_sck",   &ini_block.spi_sck_pin,      18 },
     { "pin_spi_miso",  &ini_block.spi_miso_pin,     19 },
     { "pin_spi_mosi",  &ini_block.spi_mosi_pin,     23 },
@@ -2685,7 +2692,7 @@ String readprefs ( bool output )
               String ( "/*******" ) ;
       }
       cmd = String ( "" ) ;                                 // Do not analyze this
-      
+
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
@@ -3313,7 +3320,8 @@ void setup()
                               ini_block.vs_dcs_pin,
                               ini_block.vs_dreq_pin,
                               ini_block.vs_shutdown_pin,
-                              ini_block.vs_shutdownx_pin ) ;
+                              ini_block.vs_shutdownx_pin,
+                              ini_block.led_on ) ;
   if ( ini_block.ir_pin >= 0 )
   {
     dbgprint ( "Enable pin %d for IR",
@@ -3374,6 +3382,10 @@ void setup()
         tftlog ( p ) ;                                   // Show number of tracks on TFT
       }
     }
+  }
+  if ( ini_block.led_on >= 0 )                           // On/Off LED?
+  {
+    pinMode ( ini_block.led_on, OUTPUT );                // Yes, enable output
   }
   mk_lsan() ;                                            // Make al list of acceptable networks
   // in preferences.
@@ -5570,4 +5582,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
