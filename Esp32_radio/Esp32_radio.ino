@@ -140,6 +140,8 @@
 // 16-08-2018, ES: Added Nextion support.
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display
+// 06-10-2018, DK: Added Hardware_Serial
+// 07-10-2018, DK: Added On/Off LED
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
