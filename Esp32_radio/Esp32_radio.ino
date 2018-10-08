@@ -286,6 +286,7 @@ struct ini_struct
   int8_t         spi_miso_pin ;                       // GPIO connected to SPI MISO pin
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
   int8_t         led_on ;                             // GPIO connected to ON/OFF LED
+  int8_t         led_wifi ;                           // GPIO connected to WiFi LED
   uint16_t       bat0 ;                               // ADC value for 0 percent battery charge
   uint16_t       bat100 ;                             // ADC value for 100 percent battery charge
 } ;
@@ -2358,6 +2359,31 @@ bool connectwifi()
   return ( localAP == false ) ;                         // Return result of connection
 }
 
+//**************************************************************************************************
+//                                           C H K W I F I                                         *
+//**************************************************************************************************
+// Check Status of WiFi and update WiFi LED if present.                                            *
+//**************************************************************************************************
+void chkWiFi()
+{
+  if ( ini_block.led_wifi >= 0 ) {
+    if ( ini_block.led_on >= 0 ) {
+      if ( ( WiFi.status() == WL_CONNECTED ) && ( vs1053player->getVolume() ) ) // When On/Off LED is present only activate WiFi-LED if device is "switched on"
+      {
+        digitalWrite ( ini_block.led_wifi, HIGH );
+      } else {
+        digitalWrite ( ini_block.led_wifi, LOW );
+      }
+    } else {
+      if ( WiFi.status() == WL_CONNECTED )
+      {
+        digitalWrite ( ini_block.led_wifi, HIGH );
+      } else {
+        digitalWrite ( ini_block.led_wifi, LOW );
+      }
+    }
+  }    
+}
 
 //**************************************************************************************************
 //                                           O T A S T A R T                                       *
@@ -2761,6 +2787,7 @@ void readIOprefs()
     { "pin_shutdown",  &ini_block.vs_shutdown_pin,  -1 }, // Amplifier shut-down pin
     { "pin_shutdownx", &ini_block.vs_shutdownx_pin, -1 }, // Amplifier shut-down pin (inversed logic)
     { "pin_onoffled",  &ini_block.led_on,           -1 }, // On/Off LED
+    { "pin_wifiled",   &ini_block.led_wifi,         -1 }, // WiFi status LED
     { "pin_spi_sck",   &ini_block.spi_sck_pin,      18 },
     { "pin_spi_miso",  &ini_block.spi_miso_pin,     19 },
     { "pin_spi_mosi",  &ini_block.spi_mosi_pin,     23 },
@@ -3584,6 +3611,11 @@ void setup()
   {
     pinMode ( ini_block.led_on, OUTPUT );                // Yes, enable output
   }
+  if ( ini_block.led_wifi >= 0 )                           // On/Off LED?
+  {
+    pinMode ( ini_block.led_wifi, OUTPUT );                // Yes, enable output
+  }
+  
   mk_lsan() ;                                            // Make al list of acceptable networks
   // in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
@@ -3603,6 +3635,7 @@ void setup()
   if ( NetworkFound )                                    // OTA and MQTT only if Wifi network found
   {
     dbgprint ( "Network found. Starting mqtt and OTA" ) ;
+    digitalWrite ( 21, HIGH );                           // Quick-and-Dirty Wifi-LED
     mqtt_on = ( ini_block.mqttbroker.length() > 0 ) &&   // Use MQTT if broker specified
               ( ini_block.mqttbroker != "none" ) ;
     ArduinoOTA.setHostname ( NAME ) ;                    // Set the hostname
@@ -4580,6 +4613,7 @@ void loop()
   handleIpPub() ;                                   // See if time to publish IP
   handleVolPub() ;                                  // See if time to publish volume
   chk_enc() ;                                       // Check rotary encoder functions
+  chkWiFi();                                      // Check WiFi-Status
 }
 
 
