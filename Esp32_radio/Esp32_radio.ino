@@ -2366,6 +2366,12 @@ bool connectwifi()
 //**************************************************************************************************
 void chkWiFi()
 {
+  static uint8_t oldwifistatus ;
+  
+  if ( WiFi.status() != oldwifistatus ) {
+    dbgprint ( "WiFi status has changed. New Wifi status is %d", WiFi.status() );
+    oldwifistatus = WiFi.status();
+  }
   if ( ini_block.led_wifi >= 0 ) {
     if ( ini_block.led_on >= 0 ) {
       if ( ( WiFi.status() == WL_CONNECTED ) && ( vs1053player->getVolume() ) ) // When On/Off LED is present only activate WiFi-LED if device is "switched on"
