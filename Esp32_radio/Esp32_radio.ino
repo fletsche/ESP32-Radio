@@ -1399,6 +1399,7 @@ char* dbgprint ( const char* format, ... )
   if ( DEBUG )                                         // DEBUG on?
   {
     mySerial.print ( "D: " ) ;                           // Yes, print prefix
+    mySerial.printf ( "[%10d] ", millis() );            // and current time in millis 
     mySerial.println ( sbuf ) ;                          // and the info
   }
   return sbuf ;                                        // Return stored string
