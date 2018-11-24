@@ -267,7 +267,6 @@ struct ini_struct
   String         clk_server ;                         // Server to be used for time of day clock
   int8_t         clk_offset ;                         // Offset in hours with respect to UTC
   int8_t         clk_dst ;                            // Number of hours shift during DST
-  int8_t         simplebuttonmode ;                   // Operating mode for rotary encoder button 0 = normal, 1 = start/stop
   int8_t         ir_pin ;                             // GPIO connected to output of IR decoder
   int8_t         enc_clk_pin ;                        // GPIO connected to CLK of rotary encoder
   int8_t         enc_dt_pin ;                         // GPIO connected to DT of rotary encoder
@@ -1929,20 +1928,13 @@ void IRAM_ATTR isr_enc_switch()
     sw_state = newstate ;                                  // Yes, set current (new) state
     if ( !sw_state )                                       // SW released?
     {
-      if ( ( ( newtime - oldtime ) > 1000 ) && ( !ini_block.simplebuttonmode ) ) // More than 1 second but not in simplebuttonmode?
+      if ( ( newtime - oldtime ) > 1000 )                  // More than 1 second?
       {
         longclick = true ;                                 // Yes, register longclick
       }
       else
       {
-        if ( ini_block.simplebuttonmode )
-        {
-          clickcount = 1 ;                                // Yes, count as single click
-        }
-        else
-        {
-          clickcount++ ;                                     // Yes, click detected and counted
-        }
+        clickcount++ ;                                     // Yes, click detected
       }
       enc_inactivity = 0 ;                                 // Not inactive anymore
     }
@@ -5478,10 +5470,6 @@ const char* analyzeCmd ( const char* par, const char* val )
       ini_block.bat0 = ivalue ;                       // Yes, set it
     }
   }
-  else if ( argument.startsWith ( "simplebuttonmode") ) // Simplebuttonmode ?
-  {
-    ini_block.simplebuttonmode = ivalue ;                       // Yes, set flag accordingly
-  }
   else
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
@@ -5752,3 +5740,5 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
+
+
