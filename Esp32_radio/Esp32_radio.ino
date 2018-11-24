@@ -5740,9 +5740,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-<<<<<<< HEAD
-
-
-=======
-
->>>>>>> parent of 5dcb1b6... First try on simplebuttonmode
