@@ -143,6 +143,7 @@
 // 06-10-2018, DK: Added Hardware_Serial
 // 07-10-2018, DK: Added On/Off LED
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 25-11-2018, DK: Added SimpleButtonMode
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -267,6 +268,7 @@ struct ini_struct
   String         clk_server ;                         // Server to be used for time of day clock
   int8_t         clk_offset ;                         // Offset in hours with respect to UTC
   int8_t         clk_dst ;                            // Number of hours shift during DST
+  int8_t         simplebuttonmode ;                   // Operating mode for rotary encoder button 0 = normal, 1 = only allow single click
   int8_t         ir_pin ;                             // GPIO connected to output of IR decoder
   int8_t         enc_clk_pin ;                        // GPIO connected to CLK of rotary encoder
   int8_t         enc_dt_pin ;                         // GPIO connected to DT of rotary encoder
