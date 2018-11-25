@@ -1930,13 +1930,20 @@ void IRAM_ATTR isr_enc_switch()
     sw_state = newstate ;                                  // Yes, set current (new) state
     if ( !sw_state )                                       // SW released?
     {
-      if ( ( newtime - oldtime ) > 1000 )                  // More than 1 second?
+      if ( ( ( newtime - oldtime ) > 1000 ) && ( !ini_block.simplebuttonmode ) ) // More than 1 second but not in simplebuttonmode?
       {
         longclick = true ;                                 // Yes, register longclick
       }
       else
       {
-        clickcount++ ;                                     // Yes, click detected
+        if ( ini_block.simplebuttonmode == 1 ) 
+        {
+          clickcount = 1 ;                                // Yes, count as single click
+        }
+        else
+        {
+          clickcount++ ;                                  // Yes, click detected and counted
+        }
       }
       enc_inactivity = 0 ;                                 // Not inactive anymore
     }
