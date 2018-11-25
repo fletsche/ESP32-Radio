@@ -5421,7 +5421,7 @@ const char* analyzeCmd ( const char* par, const char* val )
       ini_block.bat0 = ivalue ;                       // Yes, set it
     }
   }
-  else if ( argument.startsWith ( "simplebuttonmode") ) // Simplebuttonmode ?
+  else if ( argument == "simplebuttonmode" )         // Simplebuttonmode ?
   {
     ini_block.simplebuttonmode = ivalue ;                       // Yes, set flag accordingly
   }
