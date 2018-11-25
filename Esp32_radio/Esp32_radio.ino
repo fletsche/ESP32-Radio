@@ -3421,6 +3421,8 @@ void setup()
   const char*               wvn = "Include file %s_html has the wrong version number! "
                                   "Replace header file." ;
 
+  reservepin ( 0 ) ;                                     // Reserve Pins for HardwareSerial
+  reservepin ( 4 ) ;
   mySerial.begin ( 115200, SERIAL_8N1, 0, 4 ) ;                          // For debug, (BAUDRATE, UART-Mode, RX-pin, TX-pin)
   mySerial.println() ;
   // Version tests for some vital include files
@@ -5683,4 +5685,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
