@@ -2992,7 +2992,7 @@ void scanserial()
   while ( mySerial.available() )                   // Any input seen?
   {
     c =  (char)mySerial.read() ;                   // Yes, read the next input character
-    //mySerial.write ( c ) ;                       // Echo
+    // mySerial.write ( c ) ;                       // Echo
     len = serialcmd.length() ;                   // Get the length of the current string
     if ( ( c == '\n' ) || ( c == '\r' ) )
     {
@@ -3468,9 +3468,9 @@ void setup()
   const char*               wvn = "Include file %s_html has the wrong version number! "
                                   "Replace header file." ;
 
-  reservepin ( 0 ) ;                                     // Reserve Pins for HardwareSerial
+  reservepin ( 5 ) ;                                     // Reserve Pins for HardwareSerial
   reservepin ( 4 ) ;
-  mySerial.begin ( 115200, SERIAL_8N1, 0, 4 ) ;                          // For debug, (BAUDRATE, UART-Mode, RX-pin, TX-pin)
+  mySerial.begin ( 115200, SERIAL_8N1, 5, 0 ) ;                          // For debug, (BAUDRATE, UART-Mode, RX-pin, TX-pin)
   mySerial.println() ;
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
