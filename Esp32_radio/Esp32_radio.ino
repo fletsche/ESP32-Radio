@@ -5474,6 +5474,10 @@ const char* analyzeCmd ( const char* par, const char* val )
       ini_block.bat0 = ivalue ;                       // Yes, set it
     }
   }
+  else if ( argument == "simplebuttonmode" )         // Simplebuttonmode ?
+  {
+    ini_block.simplebuttonmode = ivalue ;                       // Yes, set flag accordingly
+  }
   else
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
