@@ -141,6 +141,7 @@
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 25-11-2018, DK: Added SimpleButtonMode
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -264,7 +265,7 @@ struct ini_struct
   String         clk_server ;                         // Server to be used for time of day clock
   int8_t         clk_offset ;                         // Offset in hours with respect to UTC
   int8_t         clk_dst ;                            // Number of hours shift during DST
-  int8_t         simplebuttonmode ;                   // Operating mode for rotary encoder button 0 = normal, 1 = start/stop
+  int8_t         simplebuttonmode ;                   // Operating mode for rotary encoder button 0 = normal, 1 = only allow single click
   int8_t         ir_pin ;                             // GPIO connected to output of IR decoder
   int8_t         enc_clk_pin ;                        // GPIO connected to CLK of rotary encoder
   int8_t         enc_dt_pin ;                         // GPIO connected to DT of rotary encoder
@@ -5694,4 +5695,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
