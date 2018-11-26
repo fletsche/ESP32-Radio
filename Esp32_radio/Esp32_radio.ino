@@ -3654,7 +3654,7 @@ void setup()
   if ( NetworkFound )                                    // OTA and MQTT only if Wifi network found
   {
     dbgprint ( "Network found. Starting mqtt and OTA" ) ;
-    digitalWrite ( 21, HIGH );                           // Quick-and-Dirty Wifi-LED
+    digitalWrite ( 21, HIGH );                           // Quick-and-Dirty Wifi-LED FIXME
     mqtt_on = ( ini_block.mqttbroker.length() > 0 ) &&   // Use MQTT if broker specified
               ( ini_block.mqttbroker != "none" ) ;
     ArduinoOTA.setHostname ( NAME ) ;                    // Set the hostname
