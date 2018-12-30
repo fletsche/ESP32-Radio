@@ -145,6 +145,7 @@
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
 // 25-11-2018, DK: Added SimpleButtonMode
 // 26-11-2018, DK: Bug fix output enable
+// 30-12-2018, DK: Added support for NEC style IR repeat codes
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -347,6 +348,8 @@ enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,        // State for datastream
                   STOPREQD = 128, STOPPED = 256
                 } ;
 
+enum ir_state_t { IR_READY, IR_START, IR_NORMAL } ;
+
 // Global variables
 int               DEBUG = 1 ;                            // Debug on/off
 int               numSsid ;                              // Number of available WiFi networks
@@ -366,7 +369,7 @@ hw_timer_t*       timer = NULL ;                         // For timer
 HardwareSerial    mySerial(1);                           // HardwareSerial for using non-standard pins
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
-uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
+uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
 qdata_struct      outchunk ;                             // Data to queue
@@ -406,9 +409,11 @@ int               chunkcount = 0 ;                       // Counter for chunked 
 String            http_getcmd ;                          // Contents of last GET command
 String            http_rqfile ;                          // Requested file
 bool              http_reponse_flag = false ;            // Response required
-uint16_t          ir_value = 0 ;                         // IR code
-uint32_t          ir_0 = 550 ;                           // Average duration of an IR short pulse
-uint32_t          ir_1 = 1650 ;                          // Average duration of an IR long pulse
+static volatile uint16_t       ir_value = 0 ;            // IR code
+static volatile bool           ir_repeat_flag = false ;  // this gets true when ir repeat code is received
+static volatile uint8_t        ir_state = IR_READY ;     // for ir code interpretation
+static volatile uint32_t       ir_0 = 550 ;              // Average duration of an IR short pulse
+static volatile uint32_t       ir_1 = 1650 ;             // Average duration of an IR long pulse
 struct tm         timeinfo ;                             // Will be filled by NTP server
 bool              time_req = false ;                     // Set time requested
 bool              SD_okay = false ;                      // True if SD card in place and readable
@@ -1401,7 +1406,7 @@ char* dbgprint ( const char* format, ... )
   va_end ( varArgs ) ;                                 // End of using parameters
   if ( DEBUG )                                         // DEBUG on?
   {
-    mySerial.printf ( "[D:%10d] ", millis() );            // Yes, print prefix and current time in millis 
+    mySerial.printf ( "[D:%10d] ", millis() );            // Yes, print prefix and current time in millis
     mySerial.println ( sbuf ) ;                          // and the info
   }
   return sbuf ;                                        // Return stored string
@@ -1853,7 +1858,6 @@ void IRAM_ATTR timer100()
   }
 }
 
-
 //**************************************************************************************************
 //                                          I S R _ I R                                            *
 //**************************************************************************************************
@@ -1874,19 +1878,33 @@ void IRAM_ATTR isr_IR()
   t1 = micros() ;                                    // Get current time
   intval = t1 - t0 ;                                 // Compute interval
   t0 = t1 ;                                          // Save for next compare
-  if ( ( intval > 300 ) && ( intval < 800 ) )        // Short pulse?
+
+  if ( ( intval > 8750 ) && ( intval < 9250 ) )      // 9 ms start burst?
+  {
+    ir_state = IR_START ;
+  }
+  else if ( ( intval > 4250 ) && ( intval < 4750 ) && ( ir_state == IR_START ) ) // 4,5 ms pause?
+  {
+    ir_state = IR_NORMAL ;                           // then normal code will follow
+  }
+  else if ( ( intval > 2000 ) && ( intval < 2500 ) && ( ir_state == IR_START ) ) // 2,25 ms pause?
+  {
+    ir_repeat_flag = true ;                         // this is a repeat code
+    ir_state = IR_READY ;                           // ready for next input
+  }
+  else if ( ( intval > 300 ) && ( intval < 800 ) && ( ir_state == IR_NORMAL) )   // Short pulse?
   {
     ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
     ir_loccount++ ;                                  // Count number of received bits
     ir_0 = ( ir_0 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
   }
-  else if ( ( intval > 1400 ) && ( intval < 1900 ) ) // Long pulse?
+  else if ( ( intval > 1400 ) && ( intval < 1900 ) && ( ir_state == IR_NORMAL ) ) // Long pulse?
   {
     ir_locvalue = ( ir_locvalue << 1 ) + 1 ;         // Shift in a "one" bit
     ir_loccount++ ;                                  // Count number of received bits
     ir_1 = ( ir_1 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
   }
-  else if ( ir_loccount == 65 )                      // Value is correct after 65 level changes
+  else if ( ( ir_loccount == 65 ) && ( ir_state == IR_NORMAL ) ) // Value is correct after 65 level changes
   {
     while ( mask_in )                                // Convert 32 bits to 16 bits
     {
@@ -1898,11 +1916,13 @@ void IRAM_ATTR isr_IR()
       mask_out <<= 1 ;                               // Shift output mask 1 position
     }
     ir_loccount = 0 ;                                // Ready for next input
+    ir_state = IR_READY ;
   }
-  else
+  else                                               // Illegal intervall length ?
   {
     ir_locvalue = 0 ;                                // Reset decoding
     ir_loccount = 0 ;
+    ir_state = IR_READY ;
   }
 }
 
@@ -1937,7 +1957,7 @@ void IRAM_ATTR isr_enc_switch()
       }
       else
       {
-        if ( ini_block.simplebuttonmode == 1 ) 
+        if ( ini_block.simplebuttonmode == 1 )
         {
           clickcount = 1 ;                                // Yes, count as single click
         }
@@ -2366,7 +2386,7 @@ bool connectwifi()
   }
   tftlog ( pfs ) ;                                      // Show IP
   delay ( 3000 ) ;                                      // Allow user to read this
-  tftlog ( "\f" ) ;                                     // Select new page if NEXTION 
+  tftlog ( "\f" ) ;                                     // Select new page if NEXTION
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2378,7 +2398,7 @@ bool connectwifi()
 void chkWiFi()
 {
   static uint8_t oldwifistatus ;
-  
+
   if ( WiFi.status() != oldwifistatus ) {
     dbgprint ( "WiFi status has changed. New Wifi status is %d", WiFi.status() );
     oldwifistatus = WiFi.status();
@@ -2399,7 +2419,7 @@ void chkWiFi()
         digitalWrite ( ini_block.led_wifi, LOW );
       }
     }
-  }    
+  }
 }
 
 //**************************************************************************************************
@@ -2456,7 +2476,7 @@ bool do_nextion_update ( uint32_t clength )
       }
       k = otaclient.read ( tmpbuff, k ) ;                      // Read a number of bytes from the stream
       dbgprint ( "TFT file, read %d bytes", k ) ;
-      nxtserial->write ( tmpbuff, k ) ;     
+      nxtserial->write ( tmpbuff, k ) ;
       while ( !nxtserial->available() )                        // Any input seen?
       {
         delay ( 20 ) ;
@@ -2487,7 +2507,7 @@ bool do_nextion_update ( uint32_t clength )
 bool do_software_update ( uint32_t clength )
 {
   bool res = false ;                                          // Update result
-  
+
   if ( Update.begin ( clength ) )                             // Update possible?
   {
     dbgprint ( "Begin OTA update, length is %d",
@@ -3063,7 +3083,7 @@ void scanserial2()
           dbgprint ( "NEXTION command seen %02X %s",
                      cmd[0], cmd + 1 ) ;
           if ( cmd[0] == 0x70 )                    // Button pressed?
-          { 
+          {
             reply = analyzeCmd ( cmd + 1 ) ;       // Analyze command and handle it
             dbgprint ( reply ) ;                   // Result for debugging
           }
@@ -3169,22 +3189,62 @@ void scanIR()
   char        mykey[20] ;                                   // For numerated key
   String      val ;                                         // Contents of preference entry
   const char* reply ;                                       // Result of analyzeCmd
+  static uint16_t lastCode ;                                // Store last value for repeat code interpretation
+  static int16_t repeatDelay ;                              // Stores the delay until the command gets repeated
+  static uint32_t nextRepeat ;                              // Stores the time for next repeat in millis
+
+  if ( ir_repeat_flag && repeatDelay )                      // It doesn't make sense to repeat all types of codes. Actually only volume+/-. Maybe also preset+/-, but then a longer pause would be needed.
+      if ( millis() > nextRepeat )
+      {
+        dbgprint ( "    now is time for next repeat (%d)", millis() );
+        dbgprint ( "    last code was:%04X", lastCode );
+        ir_value = lastCode ;                              // We inject the last code, which will lead to a new setting of nextRepeat later
+      }
+
+      ir_repeat_flag = false;                               // Reset ir_repeat_flag
+  }
 
   if ( ir_value )                                           // Any input?
   {
     sprintf ( mykey, "ir_%04X", ir_value ) ;                // Form key in preferences
     if ( nvssearch ( mykey ) )
     {
-      val = nvsgetstr ( mykey ) ;                           // Get the contents
-      dbgprint ( "IR code %04X received. Will execute %s",
-                 ir_value, val.c_str() ) ;
+      val = nvsgetstr ( mykey ) ;                           // Get the content
+
+      if ( val.indexOf('/') != -1 )                        // Does the command contain a '/' ?
+      {
+        if ( ( val.indexOf('#') == -1 ) || ( val.indexOf('#') > val.indexOf('/') ) ) // '/' is not in the comment section
+        {
+          repeatDelay = val.substring( val.indexOf('/') + 1 ).toInt() ; // '/' delimits the repeat delay (in ms) if any
+          if ( repeatDelay < 0 )
+          {
+            dbgprint ( "Error in IR command. Repeat delay can't be negative, set to zero: %s", val.c_str() );
+            repeatDelay = 0 ;
+          }
+          val = val.substring( 0, val.indexOf('/') ) ;        // Now that we know the repeat delay we trim it from the string
+        }
+        else
+        {
+          repeatDelay = 0 ;
+        }
+      }
+      else
+      {
+        repeatDelay = 0 ;                                  // This command does not get repeated
+      }
+
+      dbgprint ( "IR code %04X received. Will execute %s and repeat in %d ms if button is held longer.",
+                 ir_value, val.c_str(), repeatDelay ) ;
       reply = analyzeCmd ( val.c_str() ) ;                  // Analyze command and handle it
       dbgprint ( reply ) ;                                  // Result for debugging
+      nextRepeat = millis() + repeatDelay ;
+      lastCode = ir_value ;                                 // Store this value for repeat code interpretation
     }
     else
     {
       dbgprint ( "IR code %04X received, but not found in preferences!  Timing %d/%d",
                  ir_value, ir_0, ir_1 ) ;
+      repeatDelay = 0 ;                                     // Deactivate repeat for unknown code
     }
     ir_value = 0 ;                                          // Reset IR code received
   }
@@ -3510,11 +3570,13 @@ void setup()
 #if defined ( NEXTION )
   dbgprint ( dtyp, "NEXTION" ) ;
 #endif
+
   maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
   SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
   pi = esp_partition_find ( ESP_PARTITION_TYPE_DATA,     // Get partition iterator for
                             ESP_PARTITION_SUBTYPE_ANY,   // the NVS partition
                             partname ) ;
+
   if ( pi )
   {
     nvs = esp_partition_get ( pi ) ;                     // Get partition struct
@@ -3555,6 +3617,7 @@ void setup()
     }
     dbgprint ( "GPIO%d is %s", pinnr, p ) ;
   }
+
   readprogbuttons() ;                                    // Program the free input pins
   SPI.begin ( ini_block.spi_sck_pin,                     // Init VSPI bus with default or modified pins
               ini_block.spi_miso_pin,
@@ -3634,7 +3697,7 @@ void setup()
   {
     pinMode ( ini_block.led_wifi, OUTPUT );                // Yes, enable output
   }
-  
+
   mk_lsan() ;                                            // Make al list of acceptable networks
   // in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
@@ -4597,7 +4660,7 @@ void loop()
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
-    { 
+    {
       update_software ( "lstmodn",                  // Yes, update NEXTION image from remote image
                         UPDATEHOST, TFTFILE ) ;
     }
