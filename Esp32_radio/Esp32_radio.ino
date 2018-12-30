@@ -146,6 +146,7 @@
 // 25-11-2018, DK: Added SimpleButtonMode
 // 26-11-2018, DK: Bug fix output enable
 // 30-12-2018, DK: Added support for NEC style IR repeat codes
+// 30-12-2018, DK: Added Min/Max volume setting
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -265,6 +266,8 @@ struct ini_struct
   String         mqttuser ;                           // User for MQTT authentication
   String         mqttpasswd ;                         // Password for MQTT authentication
   uint8_t        reqvol ;                             // Requested volume
+  uint8_t        minvol ;                             // Minimum volume if > 0
+  uint8_t        maxvol ;                             // Maximum volume if < 100
   uint8_t        rtone[4] ;                           // Requested bass/treble settings
   int8_t         newpreset ;                          // Requested preset
   String         clk_server ;                         // Server to be used for time of day clock
@@ -959,6 +962,9 @@ void VS1053::setVolume ( uint8_t vol )
   if ( vol != curvol )
   {
     curvol = vol ;                                      // Save for later use
+    //dbgprint("...setVolume %d (min %d/max %d)", vol, ini_block.minvol, ini_block.maxvol );
+    if ( vol ) vol = map ( vol, 0, 100, ini_block.minvol, ini_block.maxvol ) ; // First mapping to limit min/max volume, but keep 0
+    //dbgprint(".......mapped to %d", vol);
     value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
@@ -3600,6 +3606,8 @@ void setup()
   ini_block.clk_dst = 1 ;                                // DST is +1 hour
   ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
   ini_block.bat100 = 0 ;
+  ini_block.minvol = 0 ;                                 // No minimum volume defined
+  ini_block.maxvol = 100 ;                               // Maximum volume defaults to full
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
   // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
@@ -5548,6 +5556,17 @@ const char* analyzeCmd ( const char* par, const char* val )
   else if ( argument == "smplbutmode" )               // Simplebuttonmode ?
   {
     ini_block.simplebuttonmode = ivalue ;             // Yes, set flag accordingly
+  }
+  else if ( argument.startsWith ( "vol_" ) )           // Volume limiting value?
+  {
+    if ( argument.indexOf ( "max" ) == 4 )            // Max value?
+    {
+      ini_block.maxvol = ivalue ;                     // Yes, set it
+    }
+    else if ( argument.indexOf ( "min" ) == 4 )         // Min value?
+    {
+      ini_block.minvol = ivalue ;                       // Yes, set it
+    }
   }
   else
   {
