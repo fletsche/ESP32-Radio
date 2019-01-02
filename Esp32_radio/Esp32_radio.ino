@@ -142,6 +142,7 @@
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
 // 02-01-2019, DK: Changes in shutdown pin control to make amp shutdown more reliable. Thanks to Pavulon87
+// 11-01-2019, DK: Added command (delay_amp_ena) to delay amp enable after station change to prevent crackling noise
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -286,6 +287,7 @@ struct ini_struct
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
   uint16_t       bat0 ;                               // ADC value for 0 percent battery charge
   uint16_t       bat100 ;                             // ADC value for 100 percent battery charge
+  uint16_t       output_delay ;                       // Value in ms to delay output enable after start of new preset
 } ;
 
 struct WifiInfo_t                                     // For list with WiFi info
@@ -655,6 +657,9 @@ class VS1053
     uint8_t       curvol ;                         // Current volume setting 0..100%
     bool          mute         = false ;           // Current mute state
     bool          playing      = false ;           // Current playback state
+    uint16_t      reqDelayOutput = 0 ;             // Delay output enable after startSong?
+    bool          delayOutputEna = false ;         // Current status of delay output enable
+    uint32_t      scheduledOutputEna ;             // Time for output enable
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
     const uint8_t SCI_MODE          = 0x0 ;
@@ -747,6 +752,7 @@ class VS1053
     {
       return mute ;
     }
+    void     setDelayAmpEnable ( uint16_t _reqOutEna );  // Set if and by how many ms output enable gets delayed after startSong
     void     toggleMute() ;                              // Toggle the current mute state
     void     printDetails ( const char *header ) ;       // Print config details to serial output
     void     softReset() ;                               // Do a soft reset
@@ -955,6 +961,11 @@ void VS1053::toggleMute()
   setMute ( !getMute() );
 }
 
+void VS1053::setDelayAmpEnable( uint16_t _reqOutEna )
+{
+  reqDelayOutput = _reqOutEna ;
+}
+
 void VS1053::setVolume ( uint8_t vol )
 {
   // Set volume.  Both left and right.
@@ -962,7 +973,15 @@ void VS1053::setVolume ( uint8_t vol )
   // Clicking reduced by using 0xf8 to 0x00 as limits.
   uint16_t value ;                                      // Value to send to SCI_VOL
 
-  if ( vol != curvol )
+  if ( delayOutputEna )
+  {
+    if ( millis() > scheduledOutputEna )               // Time to enable the output?
+    {
+      delayOutputEna = false ;
+      output_enable ( vol != 0 && !mute && playing ) ; // Enable/disable amplifier through shutdown pin(s)
+    }
+  }
+  else if ( vol != curvol )
   {
     curvol = vol ;                                      // Save for later use
     value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
@@ -989,7 +1008,15 @@ void VS1053::startSong()
 {
   sdi_send_fillers ( 10 ) ;
   playing = true ;
-  output_enable ( !mute ) ;                        // Enable amplifier through shutdown pin(s) unless muted
+  if ( reqDelayOutput )                                // Delay output enable ?
+  {
+    delayOutputEna = true ;
+    scheduledOutputEna = millis() + reqDelayOutput ;
+  }
+  else                                                 // or activate immediately ?
+  {
+    output_enable ( !mute ) ;        // Enable amplifier through shutdown pin(s) unless muted
+  }
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -1234,7 +1261,7 @@ void claimSPI ( const char* p )
 
   while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  )      // Claim SPI bus
   {
-    if ( count++ > 10 )
+    if ( false ) // ( count++ > 10 )
     {
       dbgprint ( "SPI semaphore not taken within %d ticks by CPU %d, id %s",
                  count * ctry,
@@ -3506,6 +3533,7 @@ void setup()
   ini_block.clk_dst = 1 ;                                // DST is +1 hour
   ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
   ini_block.bat100 = 0 ;
+  ini_block.output_delay = 0 ;                           // Default is no delay in output enable
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
   // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
@@ -4525,6 +4553,7 @@ void mp3loop()
     localfile = ( host.indexOf ( "localhost/" ) >= 0 ) ;
     if ( localfile )                                      // Play file from localhost?
     {
+      vs1053player->setDelayAmpEnable ( 0 );              // Start output without delay
       if ( connecttofile() )                              // Yes, open mp3-file
       {
         datamode = DATA ;                                 // Start in DATA mode
@@ -4537,6 +4566,8 @@ void mp3loop()
         host = host.substring ( 4 ) ;                     // Yes, remove "ihr/"
         host = xmlgethost ( host ) ;                      // Parse the xml to get the host
       }
+                                                          // Delay output to prevent crackling noise when changing stations
+      vs1053player->setDelayAmpEnable ( ini_block.output_delay );
       connecttohost() ;                                   // Switch to new host
     }
   }
@@ -5437,6 +5468,10 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       ini_block.bat0 = ivalue ;                       // Yes, set it
     }
+  }
+  else if ( argument == "delay_amp_ena" )             // Output enable delay?
+  {
+    ini_block.output_delay = ivalue ;                 // Yes, set it
   }
   else
   {
