@@ -141,6 +141,7 @@
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 03-01-2019, DK: Added option for debug messages via mqtt
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -155,10 +156,10 @@
 // Define (just one) type of display.  See documentation.
 //#define BLUETFT                      // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
-#define DUMMYTFT                     // Dummy display
+//#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
-//#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
+#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -258,6 +259,7 @@ struct ini_struct
   uint16_t       mqttport ;                           // Port, default 1883
   String         mqttuser ;                           // User for MQTT authentication
   String         mqttpasswd ;                         // Password for MQTT authentication
+  bool           mqttdbg ;                            // Use MQTT for debug messages
   uint8_t        reqvol ;                             // Requested volume
   uint8_t        rtone[4] ;                           // Requested bass/treble settings
   int8_t         newpreset ;                          // Requested preset
@@ -561,7 +563,7 @@ class mqttpubc                                           // For MQTT publishing
       { "icy/name",        MQSTRING, &icyname,          false }, // Definition for MQTT_ICYNAME
       { "icy/streamtitle", MQSTRING, &icystreamtitle,   false }, // Definition for MQTT_STREAMTITLE
       { "nowplaying",      MQSTRING, &ipaddress,        false }, // Definition for MQTT_NOWPLAYING
-      { "debug",           MQCSTR,   &dbgbuf,           false }, // Definition for MQTT_DEBUG
+      { "debug",           MQCSTR,   dbgbuf,            false }, // Definition for MQTT_DEBUG
       { "preset" ,         MQINT8,   &currentpreset,    false }, // Definition for MQTT_PRESET
       { "volume" ,         MQINT8,   &ini_block.reqvol, false }, // Definition for MQTT_VOLUME
       { "playing",         MQINT8,   &playingstat,      false }, // Definition for MQTT_PLAYING
@@ -613,8 +615,8 @@ void mqttpubc::publishtopic()
           //payload = pstr->c_str() ;                           // Get pointer to payload
           break ;
         case MQCSTR :
-          payload = ((char*)amqttpub[i].payload) ;
-          dbgprintS ( "MQCSTR is %s", ((char*)amqttpub[i].payload) );
+          payload = (char*)amqttpub[i].payload ;              // Cast to array of char
+          break;
         case MQINT8 :
           sprintf ( intvar, "%d",
                     *(int8_t*)amqttpub[i].payload ) ;         // Convert to array of char
@@ -1392,7 +1394,10 @@ char* dbgprint ( const char* format, ... )
     Serial.print ( "D: " ) ;                           // Yes, print prefix
     Serial.println ( dbgbuf ) ;                        // and the info
   }
-  mqttpub.trigger ( MQTT_DEBUG ) ;                     // Request publishing to MQTT
+  if ( ini_block.mqttdbg )
+  {
+    mqttpub.trigger ( MQTT_DEBUG ) ;                   // Request publishing to MQTT
+  }
   return dbgbuf ;                                      // Return stored string
 }
 
@@ -1405,16 +1410,17 @@ char* dbgprint ( const char* format, ... )
 char* dbgprintS ( const char* format, ... )
 {
   va_list varArgs ;                                    // For variable number of params
+  static char     sbuf[DEBUG_BUFFER_SIZE] ;            // For debug lines
 
   va_start ( varArgs, format ) ;                       // Prepare parameters
-  vsnprintf ( dbgbuf, sizeof(dbgbuf), format, varArgs ) ;  // Format the message
+  vsnprintf ( sbuf, sizeof(dbgbuf), format, varArgs ) ;// Format the message
   va_end ( varArgs ) ;                                 // End of using parameters
   if ( DEBUG )                                         // DEBUG on?
   {
     Serial.print ( "D: " ) ;                           // Yes, print prefix
-    Serial.println ( dbgbuf ) ;                          // and the info
+    Serial.println ( sbuf ) ;                          // and the info
   }
-  return dbgbuf ;                                      // Return stored string
+  return sbuf ;                                        // Return stored string
 }
 
 
@@ -3504,6 +3510,7 @@ void setup()
   ini_block.clk_dst = 1 ;                                // DST is +1 hour
   ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
   ini_block.bat100 = 0 ;
+  ini_block.mqttdbg = false ;                            // Default for debug messages via mqtt
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
   // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
@@ -5405,6 +5412,10 @@ const char* analyzeCmd ( const char* par, const char* val )
   else if ( argument == "debug" )                     // debug on/off request?
   {
     DEBUG = ivalue ;                                  // Yes, set flag accordingly
+  }
+  else if ( argument == "dbg_mqtt" )                  // debug via mqtt on/off request?
+  {
+    ini_block.mqttdbg = ivalue ;                      // Yes, set flag accordingly
   }
   else if ( argument == "getnetworks" )               // List all WiFi networks?
   {
