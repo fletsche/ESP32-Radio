@@ -155,10 +155,10 @@
 // Define (just one) type of display.  See documentation.
 //#define BLUETFT                      // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
-//#define DUMMYTFT                     // Dummy display
+#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
-#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
+//#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -357,7 +357,7 @@ SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI us
 hw_timer_t*       timer = NULL ;                         // For timer
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
-uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
+uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
 qdata_struct      outchunk ;                             // Data to queue
@@ -433,6 +433,7 @@ sv bool           tripleclick = false ;                  // True if triple click
 sv bool           longclick = false ;                    // True if longclick detected
 enum enc_menu_t { VOLUME, PRESET, TRACK } ;              // State for rotary encoder menu
 enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mode
+char              dbgbuf[DEBUG_BUFFER_SIZE] ;            // For debug lines
 
 //
 struct progpin_struct                                    // For programmable input pins
@@ -538,9 +539,9 @@ touchpin_struct   touchpin[] =                           // Touch pins and progr
 //**************************************************************************************************
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
 enum { MQTT_IP,     MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING,
-       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING, MQTT_PLAYLISTPOS
+       MQTT_DEBUG, MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING, MQTT_PLAYLISTPOS,
      } ;
-enum { MQSTRING, MQINT8, MQINT16 } ;                     // Type of variable to publish
+enum { MQSTRING, MQCSTR, MQINT8, MQINT16 } ;             // Type of variable to publish
 
 class mqttpubc                                           // For MQTT publishing
 {
@@ -554,12 +555,13 @@ class mqttpubc                                           // For MQTT publishing
     // Publication topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
     // by the the mqttprefix in the preferences.
   protected:
-    mqttpub_struct amqttpub[9] =                   // Definitions of various MQTT topic to publish
+    mqttpub_struct amqttpub[10] =                   // Definitions of various MQTT topic to publish
     { // Index is equal to enum above
       { "ip",              MQSTRING, &ipaddress,        false }, // Definition for MQTT_IP
       { "icy/name",        MQSTRING, &icyname,          false }, // Definition for MQTT_ICYNAME
       { "icy/streamtitle", MQSTRING, &icystreamtitle,   false }, // Definition for MQTT_STREAMTITLE
       { "nowplaying",      MQSTRING, &ipaddress,        false }, // Definition for MQTT_NOWPLAYING
+      { "debug",           MQCSTR,   &dbgbuf,           false }, // Definition for MQTT_DEBUG
       { "preset" ,         MQINT8,   &currentpreset,    false }, // Definition for MQTT_PRESET
       { "volume" ,         MQINT8,   &ini_block.reqvol, false }, // Definition for MQTT_VOLUME
       { "playing",         MQINT8,   &playingstat,      false }, // Definition for MQTT_PLAYING
@@ -610,6 +612,9 @@ void mqttpubc::publishtopic()
           payload = ((String*)amqttpub[i].payload)->c_str() ;
           //payload = pstr->c_str() ;                           // Get pointer to payload
           break ;
+        case MQCSTR :
+          payload = ((char*)amqttpub[i].payload) ;
+          dbgprintS ( "MQCSTR is %s", ((char*)amqttpub[i].payload) );
         case MQINT8 :
           sprintf ( intvar, "%d",
                     *(int8_t*)amqttpub[i].payload ) ;         // Convert to array of char
@@ -623,11 +628,11 @@ void mqttpubc::publishtopic()
         default :
           continue ;                                          // Unknown data type
       }
-      dbgprint ( "Publish to topic %s : %s",                  // Show for debug
+      dbgprintS ( "Publish to topic %s : %s",                 // Show for debug
                  topic, payload ) ;
       if ( !mqttclient.publish ( topic, payload ) )           // Publish!
       {
-        dbgprint ( "MQTT publish failed!" ) ;                 // Failed
+        dbgprintS ( "MQTT publish failed!" ) ;                // Failed
       }
       return ;                                                // Do the rest later
     }
@@ -1372,26 +1377,45 @@ String utf8ascii ( const char* s )
 //**************************************************************************************************
 //                                          D B G P R I N T                                        *
 //**************************************************************************************************
-// Send a line of info to serial output.  Works like vsprintf(), but checks the DEBUG flag.        *
-// Print only if DEBUG flag is true.  Always returns the formatted string.                         *
+// Send a line of info to serial output and mqtt.  Works like vsprintf(), but checks the DEBUG     *
+// flag. Print only if DEBUG flag is true.  Always returns the formatted string.                   *
 //**************************************************************************************************
 char* dbgprint ( const char* format, ... )
 {
-  static char sbuf[DEBUG_BUFFER_SIZE] ;                // For debug lines
   va_list varArgs ;                                    // For variable number of params
 
   va_start ( varArgs, format ) ;                       // Prepare parameters
-  vsnprintf ( sbuf, sizeof(sbuf), format, varArgs ) ;  // Format the message
+  vsnprintf ( dbgbuf, sizeof(dbgbuf), format, varArgs ) ;  // Format the message
   va_end ( varArgs ) ;                                 // End of using parameters
   if ( DEBUG )                                         // DEBUG on?
   {
     Serial.print ( "D: " ) ;                           // Yes, print prefix
-    Serial.println ( sbuf ) ;                          // and the info
+    Serial.println ( dbgbuf ) ;                        // and the info
   }
-  return sbuf ;                                        // Return stored string
+  mqttpub.trigger ( MQTT_DEBUG ) ;                     // Request publishing to MQTT
+  return dbgbuf ;                                      // Return stored string
 }
 
+//**************************************************************************************************
+//                                          D B G P R I N T S                                      *
+//**************************************************************************************************
+// Send a line of info to serial output only.  Works like vsprintf(), but checks the DEBUG flag.   *
+// Print only if DEBUG flag is true.  Always returns the formatted string.                         *
+//**************************************************************************************************
+char* dbgprintS ( const char* format, ... )
+{
+  va_list varArgs ;                                    // For variable number of params
 
+  va_start ( varArgs, format ) ;                       // Prepare parameters
+  vsnprintf ( dbgbuf, sizeof(dbgbuf), format, varArgs ) ;  // Format the message
+  va_end ( varArgs ) ;                                 // End of using parameters
+  if ( DEBUG )                                         // DEBUG on?
+  {
+    Serial.print ( "D: " ) ;                           // Yes, print prefix
+    Serial.println ( dbgbuf ) ;                          // and the info
+  }
+  return dbgbuf ;                                      // Return stored string
+}
 
 
 //**************************************************************************************************
@@ -2343,7 +2367,7 @@ bool connectwifi()
   }
   tftlog ( pfs ) ;                                      // Show IP
   delay ( 3000 ) ;                                      // Allow user to read this
-  tftlog ( "\f" ) ;                                     // Select new page if NEXTION 
+  tftlog ( "\f" ) ;                                     // Select new page if NEXTION
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2402,7 +2426,7 @@ bool do_nextion_update ( uint32_t clength )
       }
       k = otaclient.read ( tmpbuff, k ) ;                      // Read a number of bytes from the stream
       dbgprint ( "TFT file, read %d bytes", k ) ;
-      nxtserial->write ( tmpbuff, k ) ;     
+      nxtserial->write ( tmpbuff, k ) ;
       while ( !nxtserial->available() )                        // Any input seen?
       {
         delay ( 20 ) ;
@@ -2433,7 +2457,7 @@ bool do_nextion_update ( uint32_t clength )
 bool do_software_update ( uint32_t clength )
 {
   bool res = false ;                                          // Update result
-  
+
   if ( Update.begin ( clength ) )                             // Update possible?
   {
     dbgprint ( "Begin OTA update, length is %d",
@@ -2485,7 +2509,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   String      line ;                                            // Input header line
   String      lstmod = "" ;                                     // Last modified timestamp in NVS
   String      newlstmod ;                                       // Last modified from host
-  
+
   updatereq = false ;                                           // Clear update flag
   otastart() ;                                                  // Show something on screen
   stop_mp3client () ;                                           // Stop input stream
@@ -2523,7 +2547,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
       break ;                                                   // Yes, get the OTA started
     }
     // Check if the HTTP Response is 200.  Any other response is an error.
-    if ( line.startsWith ( "HTTP/1.1" ) )                       // 
+    if ( line.startsWith ( "HTTP/1.1" ) )                       //
     {
       if ( line.indexOf ( " 200 " ) < 0 )
       {
@@ -2542,7 +2566,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   {
     dbgprint ( "No new version available" ) ;                   // No, show reason
     otaclient.flush() ;
-    return ;    
+    return ;
   }
   if ( clength > 0 )
   {
@@ -2815,7 +2839,7 @@ String readprefs ( bool output )
               String ( "/*******" ) ;
       }
       cmd = String ( "" ) ;                                 // Do not analyze this
-      
+
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
@@ -3007,7 +3031,7 @@ void scanserial2()
           dbgprint ( "NEXTION command seen %02X %s",
                      cmd[0], cmd + 1 ) ;
           if ( cmd[0] == 0x70 )                    // Button pressed?
-          { 
+          {
             reply = analyzeCmd ( cmd + 1 ) ;       // Analyze command and handle it
             dbgprint ( reply ) ;                   // Result for debugging
           }
@@ -4528,7 +4552,7 @@ void loop()
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
-    { 
+    {
       update_software ( "lstmodn",                  // Yes, update NEXTION image from remote image
                         UPDATEHOST, TFTFILE ) ;
     }
@@ -5682,4 +5706,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
