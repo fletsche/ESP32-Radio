@@ -185,7 +185,7 @@
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
 // Also used for other naming.
-#define NAME "ESP32Radio"
+#define NAME "MomamaRadio"
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS 5
 // Adjust size of buffer to the longest expected string for nvsgetstr
@@ -357,7 +357,7 @@ SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI us
 hw_timer_t*       timer = NULL ;                         // For timer
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
-uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
+uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
 qdata_struct      outchunk ;                             // Data to queue
@@ -2343,7 +2343,7 @@ bool connectwifi()
   }
   tftlog ( pfs ) ;                                      // Show IP
   delay ( 3000 ) ;                                      // Allow user to read this
-  tftlog ( "\f" ) ;                                     // Select new page if NEXTION 
+  tftlog ( "\f" ) ;                                     // Select new page if NEXTION
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2402,7 +2402,7 @@ bool do_nextion_update ( uint32_t clength )
       }
       k = otaclient.read ( tmpbuff, k ) ;                      // Read a number of bytes from the stream
       dbgprint ( "TFT file, read %d bytes", k ) ;
-      nxtserial->write ( tmpbuff, k ) ;     
+      nxtserial->write ( tmpbuff, k ) ;
       while ( !nxtserial->available() )                        // Any input seen?
       {
         delay ( 20 ) ;
@@ -2433,7 +2433,7 @@ bool do_nextion_update ( uint32_t clength )
 bool do_software_update ( uint32_t clength )
 {
   bool res = false ;                                          // Update result
-  
+
   if ( Update.begin ( clength ) )                             // Update possible?
   {
     dbgprint ( "Begin OTA update, length is %d",
@@ -2485,7 +2485,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   String      line ;                                            // Input header line
   String      lstmod = "" ;                                     // Last modified timestamp in NVS
   String      newlstmod ;                                       // Last modified from host
-  
+
   updatereq = false ;                                           // Clear update flag
   otastart() ;                                                  // Show something on screen
   stop_mp3client () ;                                           // Stop input stream
@@ -2523,7 +2523,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
       break ;                                                   // Yes, get the OTA started
     }
     // Check if the HTTP Response is 200.  Any other response is an error.
-    if ( line.startsWith ( "HTTP/1.1" ) )                       // 
+    if ( line.startsWith ( "HTTP/1.1" ) )                       //
     {
       if ( line.indexOf ( " 200 " ) < 0 )
       {
@@ -2542,7 +2542,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   {
     dbgprint ( "No new version available" ) ;                   // No, show reason
     otaclient.flush() ;
-    return ;    
+    return ;
   }
   if ( clength > 0 )
   {
@@ -2815,7 +2815,7 @@ String readprefs ( bool output )
               String ( "/*******" ) ;
       }
       cmd = String ( "" ) ;                                 // Do not analyze this
-      
+
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
@@ -3007,7 +3007,7 @@ void scanserial2()
           dbgprint ( "NEXTION command seen %02X %s",
                      cmd[0], cmd + 1 ) ;
           if ( cmd[0] == 0x70 )                    // Button pressed?
-          { 
+          {
             reply = analyzeCmd ( cmd + 1 ) ;       // Analyze command and handle it
             dbgprint ( reply ) ;                   // Result for debugging
           }
@@ -4528,7 +4528,7 @@ void loop()
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
-    { 
+    {
       update_software ( "lstmodn",                  // Yes, update NEXTION image from remote image
                         UPDATEHOST, TFTFILE ) ;
     }
@@ -5682,4 +5682,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
