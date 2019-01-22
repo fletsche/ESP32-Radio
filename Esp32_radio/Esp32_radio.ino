@@ -194,7 +194,7 @@
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
 // Also used for other naming.
-#define NAME "ESP32Radio"
+#define NAME "MomamaRadio"
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS 5
 // Adjust size of buffer to the longest expected string for nvsgetstr
