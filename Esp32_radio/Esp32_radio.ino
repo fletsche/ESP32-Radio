@@ -5287,6 +5287,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   bool               relative ;                       // Relative argument (+ or -)
   String             tmpstr ;                         // Temporary for value
   uint32_t           av ;                             // Available in stream/file
+  bool               illParam= false ;                // Set this to true to mark an error in the command string
 
   blset ( true ) ;                                    // Enable backlight of TFT
   strcpy ( reply, "Command accepted" ) ;              // Default reply
@@ -5562,14 +5563,32 @@ const char* analyzeCmd ( const char* par, const char* val )
   {
     if ( argument.indexOf ( "max" ) == 4 )            // Max value?
     {
-      ini_block.maxvol = ivalue ;                     // Yes, set it
+      if ( ivalue >= 0 && ivalue <= 100 )
+      {
+        ini_block.maxvol = ivalue ;                   // Yes, set it
+      }
+      else
+      {
+        sprintf ( reply, "Value %d for vol_max is out of bounds (0-100)", ivalue );
+      }
     }
     else if ( argument.indexOf ( "min" ) == 4 )         // Min value?
     {
-      ini_block.minvol = ivalue ;                       // Yes, set it
+      if ( ivalue >= 0 && ivalue <= 100 )
+      {
+        ini_block.minvol = ivalue ;                   // Yes, set it
+      }
+      else
+      {
+        sprintf ( reply, "Value %d for vol_min is out of bounds (0-100)", ivalue );
+      }
     }
   }
   else
+  {
+    illParam = true ;
+  }
+  if ( illParam )
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
               NAME, argument.c_str() ) ;
