@@ -147,6 +147,8 @@
 // 26-11-2018, DK: Bug fix output enable
 // 30-12-2018, DK: Added support for NEC style IR repeat codes
 // 30-12-2018, DK: Added Min/Max volume setting
+// 02-01-2019, DK: Changes in shutdown pin control to make amp shutdown more reliable. Thanks to Pavulon87
+// 11-01-2019, DK: Added command (delay_amp_ena) to delay amp enable after station change to prevent crackling noise
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -297,6 +299,7 @@ struct ini_struct
   int8_t         led_wifi ;                           // GPIO connected to WiFi LED
   uint16_t       bat0 ;                               // ADC value for 0 percent battery charge
   uint16_t       bat100 ;                             // ADC value for 100 percent battery charge
+  uint16_t       output_delay ;                       // Value in ms to delay output enable after start of new preset
 } ;
 
 struct WifiInfo_t                                     // For list with WiFi info
@@ -395,7 +398,6 @@ String            host ;                                 // The URL to connect t
 String            playlist ;                             // The URL of the specified playlist
 bool              hostreq = false ;                      // Request for new host
 bool              reqtone = false ;                      // New tone setting requested
-bool              muteflag = false ;                     // Mute output
 bool              resetreq = false ;                     // Request to reset the ESP32
 bool              updatereq = false ;                    // Request to update software from remote host
 bool              NetworkFound = false ;                 // True if WiFi network connected
@@ -672,6 +674,11 @@ class VS1053
     int8_t        shutdownx_pin ;                  // Pin where the shutdown (inversed) line is connected
     int8_t        onoff_pin ;                      // Pin where the On/Off LED is connected
     uint8_t       curvol ;                         // Current volume setting 0..100%
+    bool          mute         = false ;           // Current mute state
+    bool          playing      = false ;           // Current playback state
+    uint16_t      reqDelayOutput = 0 ;             // Delay output enable after startSong?
+    bool          delayOutputEna = false ;         // Current status of delay output enable
+    uint32_t      scheduledOutputEna ;             // Time for output enable
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
     const uint8_t SCI_MODE          = 0x0 ;
@@ -759,6 +766,13 @@ class VS1053
     { // higher is louder.
       return curvol ;
     }
+    void     setMute ( bool _mute ) ;                    // Set the current mute state (has nothing to do with VS1053)
+    inline bool getMute() const                          // Get the current mute state (has nothing to do with VS1053)
+    {
+      return mute ;
+    }
+    void     setDelayAmpEnable ( uint16_t _reqOutEna );  // Set if and by how many ms output enable gets delayed after startSong
+    void     toggleMute() ;                              // Toggle the current mute state
     void     printDetails ( const char *header ) ;       // Print config details to serial output
     void     softReset() ;                               // Do a soft reset
     bool     testComm ( const char *header ) ;           // Test communication with module
@@ -917,6 +931,7 @@ void VS1053::begin()
     pinMode ( shutdownx_pin,   OUTPUT ) ;
   }
   output_enable ( false ) ;                            // Disable amplifier through shutdown pin(s)
+  playing = false ;
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
@@ -952,6 +967,24 @@ void VS1053::begin()
   }
 }
 
+// This following function should not use the SPI Bus!
+void VS1053::setMute (bool _mute)
+{
+  mute = _mute ;
+  output_enable ( !mute ) ;
+}
+
+// This following function should not use the SPI Bus!
+void VS1053::toggleMute()
+{
+  setMute ( !getMute() );
+}
+
+void VS1053::setDelayAmpEnable( uint16_t _reqOutEna )
+{
+  reqDelayOutput = _reqOutEna ;
+}
+
 void VS1053::setVolume ( uint8_t vol )
 {
   // Set volume.  Both left and right.
@@ -959,7 +992,15 @@ void VS1053::setVolume ( uint8_t vol )
   // Clicking reduced by using 0xf8 to 0x00 as limits.
   uint16_t value ;                                      // Value to send to SCI_VOL
 
-  if ( vol != curvol )
+  if ( delayOutputEna )
+  {
+    if ( millis() > scheduledOutputEna )               // Time to enable the output?
+    {
+      delayOutputEna = false ;
+      output_enable ( vol != 0 && !mute && playing ) ; // Enable/disable amplifier through shutdown pin(s)
+    }
+  }
+  else if ( vol != curvol )
   {
     curvol = vol ;                                      // Save for later use
     //dbgprint("...setVolume %d (min %d/max %d)", vol, ini_block.minvol, ini_block.maxvol );
@@ -968,7 +1009,7 @@ void VS1053::setVolume ( uint8_t vol )
     value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
-    output_enable ( vol != 0 ) ;                        // Enable/disable amplifier through shutdown pin(s)
+    output_enable ( vol != 0 && !mute && playing ) ;    // Enable/disable amplifier through shutdown pin(s)
   }
 
 }
@@ -989,7 +1030,16 @@ void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 ni
 void VS1053::startSong()
 {
   sdi_send_fillers ( 10 ) ;
-  output_enable ( curvol != 0 ) ;                              // Enable amplifier through shutdown pin(s), but only when Volume setting isn't zero
+  playing = true ;
+  if ( reqDelayOutput )                                // Delay output enable ?
+  {
+    delayOutputEna = true ;
+    scheduledOutputEna = millis() + reqDelayOutput ;
+  }
+  else                                                 // or activate immediately ?
+  {
+    output_enable ( !mute ) ;        // Enable amplifier through shutdown pin(s) unless muted
+  }
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -1004,6 +1054,7 @@ void VS1053::stopSong()
 
   sdi_send_fillers ( 2052 ) ;
   output_enable ( false ) ;                             // Disable amplifier through shutdown pin(s)
+  playing = false ;
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
   for ( i = 0 ; i < 200 ; i++ )
@@ -1026,6 +1077,7 @@ void VS1053::softReset()
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
   delay ( 10 ) ;
   await_data_request() ;
+  playing = false ;
 }
 
 void VS1053::printDetails ( const char *header )
@@ -1047,6 +1099,7 @@ void VS1053::printDetails ( const char *header )
   }
 }
 
+// This following function should not use the SPI Bus!
 void  VS1053::output_enable ( bool ena )               // Enable amplifier through shutdown pin(s)
 {
   if ( shutdown_pin >= 0 )                             // Shutdown in use?
@@ -1235,7 +1288,7 @@ void claimSPI ( const char* p )
 
   while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  )      // Claim SPI bus
   {
-    if ( count++ > 10 )
+    if ( false ) // ( count++ > 10 )
     {
       dbgprint ( "SPI semaphore not taken within %d ticks by CPU %d, id %s",
                  count * ctry,
@@ -3609,6 +3662,7 @@ void setup()
   ini_block.bat100 = 0 ;
   ini_block.minvol = 0 ;                                 // No minimum volume defined
   ini_block.maxvol = 100 ;                               // Maximum volume defaults to full
+  ini_block.output_delay = 0 ;                           // Default is no delay in output enable
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
   // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
@@ -4371,7 +4425,7 @@ void chk_enc()
     switch ( enc_menu_mode )                                  // Which mode (VOLUME, PRESET, TRACK)?
     {
       case VOLUME :
-        if ( muteflag )
+        if ( vs1053player->getMute()  )
         {
           tftset ( 3, "" ) ;                                  // Clear text
         }
@@ -4379,7 +4433,7 @@ void chk_enc()
         {
           tftset ( 3, "Mute" ) ;
         }
-        muteflag = !muteflag ;                                // Mute/unmute
+        vs1053player->toggleMute() ;                          // Mute/unmute
         break ;
       case PRESET :
         currentpreset = -1 ;                                  // Make sure current is different
@@ -4411,7 +4465,7 @@ void chk_enc()
         host = getSDfilename ( "0" ) ;                        // Get random track
         hostreq = true ;                                      // Request this host
       }
-      muteflag = false ;                                      // Be sure muteing is off
+      vs1053player->setMute( false ) ;                        // Be sure muteing is off
     }
   }
   if ( rotationcount == 0 )                                   // Any rotation?
@@ -4434,7 +4488,7 @@ void chk_enc()
       {
         ini_block.reqvol += rotationcount ;
       }
-      muteflag = false ;                                      // Mute off
+      vs1053player->setMute( false );                         // Mute off
       break ;
     case PRESET :
       if ( ( enc_preset + rotationcount ) < 0 )               // Negative not allowed
@@ -4640,6 +4694,7 @@ void mp3loop()
     localfile = ( host.indexOf ( "localhost/" ) >= 0 ) ;
     if ( localfile )                                      // Play file from localhost?
     {
+      vs1053player->setDelayAmpEnable ( 0 );              // Start output without delay
       if ( connecttofile() )                              // Yes, open mp3-file
       {
         datamode = DATA ;                                 // Start in DATA mode
@@ -4652,6 +4707,8 @@ void mp3loop()
         host = host.substring ( 4 ) ;                     // Yes, remove "ihr/"
         host = xmlgethost ( host ) ;                      // Parse the xml to get the host
       }
+                                                          // Delay output to prevent crackling noise when changing stations
+      vs1053player->setDelayAmpEnable ( ini_block.output_delay );
       connecttohost() ;                                   // Switch to new host
     }
   }
@@ -5347,13 +5404,13 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       ini_block.reqvol = 100 ;                        // Limit to normal values
     }
-    muteflag = false ;                                // Stop possibly muting
+    vs1053player->setMute( false ) ;                  // Stop possible muting
     sprintf ( reply, "Volume is now %d",              // Reply new volume
               ini_block.reqvol ) ;
   }
   else if ( argument == "mute" )                      // Mute/unmute request
   {
-    muteflag = !muteflag ;                            // Request volume to zero/normal
+    vs1053player->toggleMute() ;
   }
   else if ( argument.indexOf ( "ir_" ) >= 0 )         // Ir setting?
   { // Do not handle here
@@ -5584,6 +5641,10 @@ const char* analyzeCmd ( const char* par, const char* val )
       }
     }
   }
+  else if ( argument == "delay_amp_ena" )             // Output enable delay?
+  {
+    ini_block.output_delay = ivalue ;                 // Yes, set it
+  }
   else
   {
     illParam = true ;
@@ -5764,8 +5825,7 @@ void playtask ( void * parameter )
           playingstat = 0 ;                                         // Status for MQTT
           mqttpub.trigger ( MQTT_PLAYING ) ;                        // Request publishing to MQTT
           claimSPI ( "stopsong" ) ;                                 // Claim SPI bus
-          vs1053player->setVolume ( 0 ) ;                           // Mute
-          vs1053player->stopSong() ;                                // STOP, stop player
+          vs1053player->stopSong() ;                                // STOP, stop player, also mutes
           releaseSPI() ;                                            // Release SPI bus
           vTaskDelay ( 500 / portTICK_PERIOD_MS ) ;                 // Pause for a short time
           break ;
@@ -5801,14 +5861,9 @@ void handle_spec()
     releaseSPI() ;                                            // Yes, release SPI bus
   }
   claimSPI ( "hspec" ) ;                                      // Claim SPI bus
-  if ( muteflag )                                             // Mute or not?
-  {
-    vs1053player->setVolume ( 0 ) ;                           // Mute
-  }
-  else
-  {
-    vs1053player->setVolume ( ini_block.reqvol ) ;            // Unmute
-  }
+
+  vs1053player->setVolume ( ini_block.reqvol ) ;              // Update volume to requested volume, this should not affect mute status
+
   if ( reqtone )                                              // Request to change tone?
   {
     reqtone = false ;
