@@ -3598,7 +3598,7 @@ void setup()
 
   reservepin ( 5 ) ;                                     // Reserve Pins for HardwareSerial
   reservepin ( 4 ) ;
-  mySerial.begin ( 115200, SERIAL_8N1, 5, 0 ) ;                          // For debug, (BAUDRATE, UART-Mode, RX-pin, TX-pin)
+  mySerial.begin ( 115200, SERIAL_8N1, 5, 17 ) ;                          // For debug, (BAUDRATE, UART-Mode, RX-pin, TX-pin)
   mySerial.println() ;
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
