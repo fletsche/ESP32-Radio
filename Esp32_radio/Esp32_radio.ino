@@ -2457,26 +2457,39 @@ bool connectwifi()
 void chkWiFi()
 {
   static uint8_t oldwifistatus ;
+  static uint32_t wifiblinkctr = 0 ;
+  static uint8_t wifiblinkstate = 0;
 
   if ( WiFi.status() != oldwifistatus ) {
     dbgprint ( "WiFi status has changed. New Wifi status is %d", WiFi.status() );
     oldwifistatus = WiFi.status();
   }
   if ( ini_block.led_wifi >= 0 ) {
-    if ( ini_block.led_on >= 0 ) {
-      if ( ( WiFi.status() == WL_CONNECTED ) && ( vs1053player->getVolume() ) ) // When On/Off LED is present only activate WiFi-LED if device is "switched on"
-      {
-        digitalWrite ( ini_block.led_wifi, HIGH );
+    if ( NetworkFound ) {
+      if ( ini_block.led_on >= 0 ) {
+        if ( ( WiFi.status() == WL_CONNECTED ) && ( !vs1053player->getMute() ) ) // When On/Off LED is present only activate WiFi-LED if device is "switched on"
+        {
+          digitalWrite ( ini_block.led_wifi, HIGH );
+        } else {
+          digitalWrite ( ini_block.led_wifi, LOW );
+        }
       } else {
-        digitalWrite ( ini_block.led_wifi, LOW );
+        if ( WiFi.status() == WL_CONNECTED )
+        {
+          digitalWrite ( ini_block.led_wifi, HIGH );
+        } else {
+          digitalWrite ( ini_block.led_wifi, LOW );
+        }
       }
-    } else {
-      if ( WiFi.status() == WL_CONNECTED )
+    }
+    else                                                                    // No network found
+    {
+      if ( millis() > wifiblinkctr )
       {
-        digitalWrite ( ini_block.led_wifi, HIGH );
-      } else {
-        digitalWrite ( ini_block.led_wifi, LOW );
+        wifiblinkstate = !wifiblinkstate ;
+        wifiblinkctr = millis() + 500 ;
       }
+      digitalWrite ( ini_block.led_wifi, wifiblinkstate ) ;
     }
   }
 }
