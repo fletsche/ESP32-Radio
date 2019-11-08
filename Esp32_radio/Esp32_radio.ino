@@ -148,12 +148,17 @@
 // 30-12-2018, DK: Added support for NEC style IR repeat codes
 // 30-12-2018, DK: Added Min/Max volume setting
 // 02-01-2019, DK: Changes in shutdown pin control to make amp shutdown more reliable. Thanks to Pavulon87
+// 05-01-2019, ES: Fine tune datarate.
+// 05-01-2019, ES: Basic http authentication. (just one user)
 // 11-01-2019, DK: Added command (delay_amp_ena) to delay amp enable after station change to prevent crackling noise
+// 11-02-2019, ES: MQTT topic and subtopic size enlarged.
+// 24-04-2019, ES: Do not lock SPI during gettime().  Calling gettime may take a long time.
+// 15-05-2019, ES: MAX number of presets as a defined constant.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Thu, 04 Oct 2018 07:22:32 GMT"
+#define VERSION     "Thu, 16 May 2019 12:10:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -186,15 +191,18 @@
 #include <driver/adc.h>
 #include <Update.h>
 #include <HardwareSerial.h>
-
+#include <base64.h>
 // Number of entries in the queue
 #define QSIZ 400
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 150
+#define NVSBUFSIZE 150
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
-// Not that the password of an AP must be at least as long as 8 characters.
+// Note that the password of an AP must be at least as long as 8 characters.
 // Also used for other naming.
 #define NAME "MomamaRadio"
+// Max number of presets in preferences
+#define MAXPRESETS 200
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS 5
 // Adjust size of buffer to the longest expected string for nvsgetstr
@@ -271,7 +279,7 @@ struct ini_struct
   uint8_t        minvol ;                             // Minimum volume if > 0
   uint8_t        maxvol ;                             // Maximum volume if < 100
   uint8_t        rtone[4] ;                           // Requested bass/treble settings
-  int8_t         newpreset ;                          // Requested preset
+  int16_t        newpreset ;                          // Requested preset
   String         clk_server ;                         // Server to be used for time of day clock
   int8_t         clk_offset ;                         // Offset in hours with respect to UTC
   int8_t         clk_dst ;                            // Number of hours shift during DST
@@ -332,7 +340,7 @@ struct nvs_page                                       // For nvs entries
 
 struct keyname_t                                      // For keys in NVS
 {
-  char      Key[16] ;                                 // Mac length is 15 plus delimeter
+  char      Key[16] ;                                 // Max length is 15 plus delimeter
 } ;
 
 //**************************************************************************************************
@@ -393,7 +401,7 @@ String            ipaddress ;                            // Own IP-address
 int               bitrate ;                              // Bitrate in kb/sec
 int               mbitrate ;                             // Measured bitrate
 int               metaint = 0 ;                          // Number of databytes between metadata
-int8_t            currentpreset = -1 ;                   // Preset station playing
+int16_t           currentpreset = -1 ;                   // Preset station playing
 String            host ;                                 // The URL to connect to or file to play
 String            playlist ;                             // The URL of the specified playlist
 bool              hostreq = false ;                      // Request for new host
@@ -413,7 +421,7 @@ bool              chunked = false ;                      // Station provides chu
 int               chunkcount = 0 ;                       // Counter for chunked transfer
 String            http_getcmd ;                          // Contents of last GET command
 String            http_rqfile ;                          // Requested file
-bool              http_reponse_flag = false ;            // Response required
+bool              http_response_flag = false ;           // Response required
 static volatile uint16_t       ir_value = 0 ;            // IR code
 static volatile bool           ir_repeat_flag = false ;  // this gets true when ir repeat code is received
 static volatile uint8_t        ir_state = IR_READY ;     // for ir code interpretation
@@ -614,7 +622,7 @@ void mqttpubc::trigger ( uint8_t item )                    // Trigger publishig 
 void mqttpubc::publishtopic()
 {
   int         i = 0 ;                                         // Loop control
-  char        topic[40] ;                                     // Topic to send
+  char        topic[80] ;                                     // Topic to send
   const char* payload ;                                       // Points to payload
   char        intvar[10] ;                                    // Space for integer parameter
   while ( amqttpub[i].topic )
@@ -780,6 +788,8 @@ class VS1053
     {
       return ( digitalRead ( dreq_pin ) == HIGH ) ;
     }
+    void     AdjustRate ( long ppm2 ) ;                  // Fine tune the datarate
+
 } ;
 
 //**************************************************************************************************
@@ -906,7 +916,7 @@ bool VS1053::testComm ( const char *header )
     r2 = read_register ( SCI_VOL ) ;                    // Read back a second time
     if  ( r1 != r2 || i != r1 || i != r2 )              // Check for 2 equal reads
     {
-      dbgprint ( "VS1053 error retry SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
+      dbgprint ( "VS1053 SPI error. SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
       cnt++ ;
       delay ( 10 ) ;
     }
@@ -1114,6 +1124,19 @@ void  VS1053::output_enable ( bool ena )               // Enable amplifier throu
   {
     digitalWrite ( onoff_pin, ena ) ;                 // Change status of On/Off LED
   }
+}
+
+
+void VS1053::AdjustRate ( long ppm2 )                  // Fine tune the data rate
+{
+  write_register ( SCI_WRAMADDR, 0x1e07 ) ;
+  write_register ( SCI_WRAM,     ppm2 ) ;
+  write_register ( SCI_WRAM,     ppm2 >> 16 ) ;
+  // oldClock4KHz = 0 forces  adjustment calculation when rate checked.
+  write_register ( SCI_WRAMADDR, 0x5b1c ) ;
+  write_register ( SCI_WRAM,     0 ) ;
+  // Write to AUDATA or CLOCKF checks rate and recalculates adjustment.
+  write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
 }
 
 
@@ -2032,8 +2055,6 @@ void IRAM_ATTR isr_enc_switch()
 }
 
 
-
-
 //**************************************************************************************************
 //                                          I S R _ E N C _ T U R N                                *
 //**************************************************************************************************
@@ -2187,6 +2208,7 @@ bool connecttohost()
   uint16_t    port = 80 ;                           // Port number for host
   String      extension = "/" ;                     // May be like "/mp3" in "skonto.ls.lv:8002/mp3"
   String      hostwoext = host ;                    // Host without extension and portnumber
+  String      auth  ;                               // For basic authentication
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
@@ -2223,7 +2245,13 @@ bool connecttohost()
   if ( mp3client.connect ( hostwoext.c_str(), port ) )
   {
     dbgprint ( "Connected to server" ) ;
-    // This will send the request to the server. Request metadata.
+    auth = nvsgetstr ( "basicauth" ) ;              // Use basic authentication?
+    if ( auth != "" )                               // Should be user:passwd
+    {
+       auth = base64::encode ( auth.c_str() ) ;     // Encode
+       auth = String ( "Authorization: Basic " ) +
+              auth + String ( "\r\n" ) ;
+    }
     mp3client.print ( String ( "GET " ) +
                       extension +
                       String ( " HTTP/1.1\r\n" ) +
@@ -2231,6 +2259,7 @@ bool connecttohost()
                       hostwoext +
                       String ( "\r\n" ) +
                       String ( "Icy-MetaData:1\r\n" ) +
+                      auth +
                       String ( "Connection: close\r\n\r\n" ) ) ;
     return true ;
   }
@@ -2720,21 +2749,27 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
 //**************************************************************************************************
 // Read the mp3 host from the preferences specified by the parameter.                              *
 // The host will be returned.                                                                      *
+// We search for "preset_x" or "preset_xx" or "preset_xxx".										   *
 //**************************************************************************************************
-String readhostfrompref ( int8_t preset )
+String readhostfrompref ( int16_t preset )
 {
-  char           tkey[12] ;                            // Key as an array of chars
+  char           tkey[12] ;                            // Key as an array of char
 
-  sprintf ( tkey, "preset_%02d", preset ) ;            // Form the search key
-  if ( nvssearch ( tkey ) )                            // Does it exists?
+  sprintf ( tkey, "preset_%d", preset ) ;              // Form the search key
+  if ( !nvssearch ( tkey ) )                           // Does _x[x[x]] exists?
   {
-    // Get the contents
-    return nvsgetstr ( tkey ) ;                        // Get the station (or empty sring)
+    sprintf ( tkey, "preset_%03d", preset ) ;          // Form new search key
+    if ( !nvssearch ( tkey ) )                         // Does _xxx exists?
+    {
+      sprintf ( tkey, "preset_%02d", preset ) ;        // Form new search key
+    }
+    if ( !nvssearch ( tkey ) )                         // Does _xx exists?
+    {
+      return String ( "" ) ;                           // Not found
+    }
   }
-  else
-  {
-    return String ( "" ) ;                             // Not found
-  }
+  // Get the contents
+  return nvsgetstr ( tkey ) ;                          // Get the station (or empty sring)
 }
 
 
@@ -2751,11 +2786,11 @@ String readhostfrompref()
 
   while ( ( contents = readhostfrompref ( ini_block.newpreset ) ) == "" )
   {
-    if ( ++ maxtry > 99 )
+    if ( ++maxtry >= MAXPRESETS )
     {
       return "" ;
     }
-    if ( ++ini_block.newpreset > 99 )                   // Next or wrap to 0
+    if ( ++ini_block.newpreset >= MAXPRESETS )          // Next or wrap to 0
     {
       ini_block.newpreset = 0 ;
     }
@@ -3007,7 +3042,7 @@ bool mqttreconnect()
   static uint32_t retrytime = 0 ;                         // Limit reconnect interval
   bool            res = false ;                           // Connect result
   char            clientid[20] ;                          // Client ID
-  char            subtopic[20] ;                          // Topic to subscribe
+  char            subtopic[60] ;                          // Topic to subscribe
 
   if ( ( millis() - retrytime ) < 5000 )                  // Don't try to frequently
   {
@@ -3407,16 +3442,13 @@ void getsettings()
   String              val ;                              // Result to send
   String              statstr ;                          // Station string
   int                 inx ;                              // Position of search char in line
-  int                 i ;                                // Loop control, preset number
-  char                tkey[12] ;                         // Key for preset preference
+  int16_t             i ;                                // Loop control, preset number
 
-  for ( i = 0 ; i < 100 ; i++ )                          // Max 99 presets
+  for ( i = 0 ; i < MAXPRESETS ; i++ )                   // Max number of presets
   {
-    sprintf ( tkey, "preset_%02d", i ) ;                 // Preset plus number
-    if ( nvssearch ( tkey ) )                            // Does it exists?
+    statstr = readhostfrompref ( i ) ;   				         // Get the preset from NVS
+    if ( statstr != "" )								                 // Preset available?
     {
-      // Get the contents
-      statstr = nvsgetstr ( tkey ) ;                     // Get the station
       // Show just comment if available.  Otherwise the preset itself.
       inx = statstr.indexOf ( "#" ) ;                    // Get position of "#"
       if ( inx > 0 )                                     // Hash sign present?
@@ -3424,7 +3456,9 @@ void getsettings()
         statstr.remove ( 0, inx + 1 ) ;                  // Yes, remove non-comment part
       }
       chomp ( statstr ) ;                                // Remove garbage from description
-      val += String ( tkey ) +
+      dbgprint ( "statstr is %s", statstr.c_str() ) ;
+      val += String ( "preset_" ) +
+             String ( i ) +
              String ( "=" ) +
              statstr +
              String ( "\n" ) ;                           // Add delimeter
@@ -3780,10 +3814,11 @@ void setup()
   WiFi.persistent ( false ) ;                            // Do not save SSID and password
   WiFi.disconnect() ;                                    // After restart router could still
   delay ( 100 ) ;                                        // keep old connection
-  listNetworks() ;                                       // Search for WiFi networks
+  listNetworks() ;                                       // Find WiFi networks
   readprefs ( false ) ;                                  // Read preferences
-  tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA, NAME ) ;
-  vs1053player->begin() ;                                 // Initialize VS1053 player
+  tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA,
+                               NAME ) ;
+  vs1053player->begin() ;                                // Initialize VS1053 player
   delay(10);
   p = dbgprint ( "Connect to WiFi" ) ;                   // Show progress
   tftlog ( p ) ;                                         // On TFT too
@@ -4017,9 +4052,9 @@ void handlehttpreply()
   String        sndstr = "" ;                               // String to send
   int           n ;                                         // Number of files on SD card
 
-  if ( http_reponse_flag )
+  if ( http_response_flag )
   {
-    http_reponse_flag = false ;
+    http_response_flag = false ;
     if ( cmdclient.connected() )
     {
       if ( http_rqfile.length() == 0 &&                     // An empty "GET"?
@@ -4055,6 +4090,7 @@ void handlehttpreply()
           else if ( http_getcmd.startsWith ("saveprefs") )  // Is is a "Save preferences"
           {
             writeprefs() ;                                  // Yes, handle it
+            sndstr += String ( "Config saved" ) ;           // Give reply
           }
           else if ( http_getcmd.startsWith ( "mp3list" ) )  // Is is a "Get SD MP3 tracklist"?
           {
@@ -4128,7 +4164,7 @@ void handlehttp()
       // that's the end of the client HTTP request, so send a response:
       if ( currentLine.length() == 0 )
       {
-        http_reponse_flag = reqseen ;                        // Response required or not
+        http_response_flag = reqseen ;                       // Response required or not
         break ;
       }
       else
@@ -5314,7 +5350,7 @@ const char* analyzeCmd ( const char* str )
 // "wifi_00" and "preset_00" may appear more than once, like wifi_01, wifi_02, etc.                *
 // Examples with available parameters:                                                             *
 //   preset     = 12                        // Select start preset to connect to                   *
-//   preset_00  = <mp3 stream>              // Specify station for a preset 00-99 *)               *
+//   preset_00  = <mp3 stream>              // Specify station for a preset 00-max *)              *
 //   volume     = 95                        // Percentage between 0 and 100                        *
 //   upvolume   = 2                         // Add percentage to current volume                    *
 //   downvolume = 2                         // Subtract percentage from current volume             *
@@ -5450,15 +5486,16 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       if ( relative )                                 // Relative argument?
       {
+        currentpreset = ini_block.newpreset ;         // Remember currentpreset
         ini_block.newpreset += ivalue ;               // Yes, adjust currentpreset
       }
       else
       {
         ini_block.newpreset = ivalue ;                // Otherwise set station
         playlist_num = 0 ;                            // Absolute, reset playlist
+        currentpreset = -1 ;                          // Make sure current is different
       }
       datamode = STOPREQD ;                           // Force stop MP3 player
-      currentpreset = -1 ;                            // Make sure current is different
       sprintf ( reply, "Preset is now %d",            // Reply new preset
                 ini_block.newpreset ) ;
     }
@@ -5566,6 +5603,10 @@ const char* analyzeCmd ( const char* par, const char* val )
     reqtone = true ;                                  // Set change request
     sprintf ( reply, "Parameter for bass/treble %s set to %d",
               argument.c_str(), ivalue ) ;
+  }
+  else if ( argument == "rate" )                      // Rate command?
+  {
+    vs1053player->AdjustRate ( ivalue ) ;             // Yes, adjust
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {
@@ -5862,7 +5903,7 @@ void handle_spec()
   // Do some special function if necessary
   if ( dsp_usesSPI() )                                        // Does display uses SPI?
   {
-    claimSPI ( "hspec" ) ;                                    // Yes, claim SPI bus
+    claimSPI ( "hspectft" ) ;                                 // Yes, claim SPI bus
   }
   if ( tft )                                                  // Need to update TFT?
   {
@@ -5872,6 +5913,10 @@ void handle_spec()
   if ( dsp_usesSPI() )                                        // Does display uses SPI?
   {
     releaseSPI() ;                                            // Yes, release SPI bus
+  }
+  if ( time_req && NetworkFound )                             // Time to refresh time?
+  {
+    gettime() ;                                               // Yes, get the current time
   }
   claimSPI ( "hspec" ) ;                                      // Claim SPI bus
 
@@ -5887,7 +5932,6 @@ void handle_spec()
     time_req = false ;                                        // Yes, clear request
     if ( NetworkFound  )                                      // Time available?
     {
-      gettime() ;                                             // Yes, get the current time
       displaytime ( timetxt ) ;                               // Write to TFT screen
       displayvolume() ;                                       // Show volume on display
       displaybattery() ;                                      // Show battery charge on display
