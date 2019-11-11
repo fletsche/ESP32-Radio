@@ -4351,7 +4351,7 @@ void handleSaveReq()
   }
   savetime = millis() ;                                   // Set time of last save
   nvssetstr ( "preset", String ( currentpreset )  ) ;     // Save current preset
-  nvssetstr ( "volume", String ( ini_block.reqvol ) );    // Save current volue
+  // nvssetstr ( "volume", String ( ini_block.reqvol ) );    // Save current volue
   nvssetstr ( "toneha", String ( ini_block.rtone[0] ) ) ; // Save current toneha
   nvssetstr ( "tonehf", String ( ini_block.rtone[1] ) ) ; // Save current tonehf
   nvssetstr ( "tonela", String ( ini_block.rtone[2] ) ) ; // Save current tonela
